@@ -23,4 +23,4 @@ Usage:
 $ minimalwave
 ```
 
-
+![](static/screenshot-2025-11-05-132530.png)
