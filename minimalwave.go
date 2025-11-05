@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const userAgent = "minimalwave (https://github.com/miku/minimalwave)"
+
 func main() {
 	userCacheDir, err := os.UserCacheDir()
 	if err != nil {
@@ -72,7 +74,12 @@ func downloadOrUseCached(identifier, cachePath string) error {
 	stopAnimation := make(chan bool)
 	go animateConnecting(stopAnimation)
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := http.DefaultClient.Do(req)
 	stopAnimation <- true
 	fmt.Print("\r\033[K")
 
