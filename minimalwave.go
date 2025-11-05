@@ -14,11 +14,11 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "minimalwave" {
-		fmt.Println("Usage: minimalwave")
-		return
+	userCacheDir, err := os.UserCacheDir()
+	if err != nil {
+		log.Fatal(err)
 	}
-	cacheDir := filepath.Join(os.TempDir(), "minimalwave")
+	cacheDir := filepath.Join(userCacheDir, "minimalwave")
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -39,8 +39,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	sigChan := make(chan os.Signal, 1)
 
 	cmd := exec.Command(player, args...)
 	cmd.Stdout = os.Stdout
@@ -65,14 +63,17 @@ func downloadOrUseCached(identifier, cachePath string) error {
 	if _, err := os.Stat(cachePath); err == nil {
 		return nil
 	}
-	url := fmt.Sprintf("https://archive.org/download/%s/%s.mp3", identifier, identifier)
+	if len(identifier) != 23 {
+		return fmt.Errorf("unexpected id: %v", identifier)
+	}
+	url := fmt.Sprintf("https://archive.org/download/%s/%s.mp3", identifier, identifier[4:])
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("download (%s) failed with status: %d", url, resp.StatusCode)
 	}
 	file, err := os.Create(cachePath)
 	if err != nil {
