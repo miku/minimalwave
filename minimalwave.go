@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -79,8 +80,14 @@ func downloadOrUseCached(identifier, cachePath, cacheDir string) (string, error)
 	url := fmt.Sprintf("https://archive.org/download/%s/%s.mp3", identifier, identifier[4:])
 	stopAnimation := make(chan bool)
 	go animateConnecting(stopAnimation)
+
 	client := &http.Client{
-		Timeout: httpTimeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: httpTimeout,
+			}).DialContext,
+			TLSHandshakeTimeout: httpTimeout,
+		},
 	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
