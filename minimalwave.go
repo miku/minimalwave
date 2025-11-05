@@ -23,6 +23,9 @@ func main() {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		log.Fatal(err)
 	}
+	if err := cleanupTempFiles(cacheDir); err != nil {
+		log.Printf("warning: failed to clean up temp files: %v", err)
+	}
 	var (
 		identifier = identifiers[time.Now().UnixNano()%int64(len(identifiers))]
 		hasher     = md5.New()
@@ -40,16 +43,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	cmd := exec.Command(player, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	cmd.Stdin = os.Stdin
-
 	if err := cmd.Start(); err != nil {
 		log.Fatal(err)
 	}
-
 	if err := cmd.Wait(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if exitError.ExitCode() == 130 { // SIGINT
@@ -91,7 +91,7 @@ func downloadOrUseCached(identifier, cachePath string) error {
 		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
 	tempPath := tempFile.Name()
-	
+
 	// Ensure cleanup of temp file on error
 	defer func() {
 		if tempPath != "" {
@@ -128,7 +128,7 @@ func downloadOrUseCached(identifier, cachePath string) error {
 
 	// Clear tempPath so defer doesn't try to remove it
 	tempPath = ""
-	
+
 	return nil
 }
 
@@ -177,7 +177,7 @@ func animateConnecting(stop chan bool) {
 
 // createColorBlockProgress returns a progress callback that displays colorful blocks
 func createColorBlockProgress(total int64) func(current, total int64) {
-	const blockCount = 100
+	const blockCount = 64
 	var (
 		lastBlocks = 0
 		rng        = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -228,6 +228,23 @@ func findPlayer(filePath string) (string, []string, error) {
 		}
 	}
 	return "", nil, fmt.Errorf("no suitable player found")
+}
+
+// cleanupTempFiles removes any .tmp files left from interrupted downloads
+func cleanupTempFiles(cacheDir string) error {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".tmp" {
+			path := filepath.Join(cacheDir, entry.Name())
+			if err := os.Remove(path); err != nil {
+				log.Printf("warning: failed to remove temp file %s: %v", path, err)
+			}
+		}
+	}
+	return nil
 }
 
 // identifiers can be mapped to download urls, https://archive.org/download/evr_1280-23176-20101128/1280-23176-20101128.mp3
