@@ -15,7 +15,7 @@ To install:
 $ go install github.com/miku/minimalwave@latest
 ```
 
-![](static/eastvillageradio-minimal-wave.jpg)
+[![](static/eastvillageradio-minimal-wave.jpg)](https://archive.org/details/eastvillageradio-minimal-wave?tab=collection)
 
 Usage:
 
