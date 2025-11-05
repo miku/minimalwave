@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -39,16 +40,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	cmd := exec.Command(player, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-
 	if err := cmd.Start(); err != nil {
 		log.Fatal(err)
 	}
-
 	if err := cmd.Wait(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if exitError.ExitCode() == 130 { // SIGINT
@@ -80,11 +78,63 @@ func downloadOrUseCached(identifier, cachePath string) error {
 		return fmt.Errorf("failed to create cache file: %v", err)
 	}
 	defer file.Close()
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to save to cache: %v", err)
+	totalSize := resp.ContentLength
+	progressReader := &progressReader{
+		reader:     resp.Body,
+		total:      totalSize,
+		onProgress: createColorBlockProgress(totalSize),
 	}
-	return nil
+	_, err = io.Copy(file, progressReader)
+	fmt.Println()
+	return err
+}
+
+// progressReader wraps an io.Reader to track read progress
+type progressReader struct {
+	reader     io.Reader
+	total      int64
+	current    int64
+	onProgress func(current, total int64)
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.reader.Read(p)
+	pr.current += int64(n)
+	if pr.onProgress != nil {
+		pr.onProgress(pr.current, pr.total)
+	}
+	return n, err
+}
+
+// createColorBlockProgress returns a progress callback that displays colorful blocks
+func createColorBlockProgress(total int64) func(current, total int64) {
+	const blockCount = 50
+	lastBlocks := 0
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// ANSI 256-color palette - vibrant colors
+	colors := []int{
+		196, 202, 208, 214, 220, 226, // reds to yellows
+		46, 47, 48, 49, 50, 51, // greens
+		39, 45, 81, 87, 123, // cyans to blues
+		129, 135, 141, 177, 183, // purples
+		201, 207, 213, 219, 225, // pinks to light colors
+	}
+
+	return func(current, total int64) {
+		if total <= 0 {
+			return
+		}
+		progress := float64(current) / float64(total)
+		blocks := int(progress * blockCount)
+		if blocks > lastBlocks {
+			for i := lastBlocks; i < blocks; i++ {
+				color := colors[rng.Intn(len(colors))]
+				fmt.Printf("\033[48;5;%dm \033[0m", color)
+			}
+			lastBlocks = blocks
+		}
+	}
 }
 
 func findPlayer(filePath string) (string, []string, error) {
