@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const userAgent = "minimalwave (https://github.com/miku/minimalwave)"
+const (
+	userAgent   = "minimalwave (https://github.com/miku/minimalwave)"
+	httpTimeout = 10 * time.Second
+)
 
 func main() {
 	userCacheDir, err := os.UserCacheDir()
@@ -28,6 +31,7 @@ func main() {
 	if err := cleanupTempFiles(cacheDir); err != nil {
 		log.Printf("warning: failed to clean up temp files: %v", err)
 	}
+
 	var (
 		identifier = identifiers[time.Now().UnixNano()%int64(len(identifiers))]
 		hasher     = md5.New()
@@ -38,10 +42,13 @@ func main() {
 		filename  = fmt.Sprintf("%s.mp3", hash)
 		cachePath = filepath.Join(cacheDir, filename)
 	)
-	if err := downloadOrUseCached(identifier, cachePath); err != nil {
+
+	fileToPlay, err := downloadOrUseCached(identifier, cachePath, cacheDir)
+	if err != nil {
 		log.Fatal(err)
 	}
-	player, args, err := findPlayer(cachePath)
+
+	player, args, err := findPlayer(fileToPlay)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -62,101 +69,108 @@ func main() {
 	}
 }
 
-func downloadOrUseCached(identifier, cachePath string) error {
+func downloadOrUseCached(identifier, cachePath, cacheDir string) (string, error) {
 	if _, err := os.Stat(cachePath); err == nil {
-		return nil
+		return cachePath, nil
 	}
 	if len(identifier) != 23 {
-		return fmt.Errorf("unexpected id: %v", identifier)
+		return "", fmt.Errorf("unexpected id: %v", identifier)
 	}
 	url := fmt.Sprintf("https://archive.org/download/%s/%s.mp3", identifier, identifier[4:])
-
 	stopAnimation := make(chan bool)
 	go animateConnecting(stopAnimation)
-
+	client := &http.Client{
+		Timeout: httpTimeout,
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	stopAnimation <- true
 	fmt.Print("\r\033[K")
-
 	if err != nil {
-		return fmt.Errorf("failed to download: %v", err)
+		cachedFile, cacheErr := findRandomCachedFile(cacheDir)
+		if cacheErr != nil {
+			fmt.Printf("no connection and nothing cached")
+			os.Exit(1)
+		}
+		return cachedFile, nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download (%s) failed with status: %d", url, resp.StatusCode)
+		return "", fmt.Errorf("download (%s) failed with status: %d", url, resp.StatusCode)
 	}
-
-	cacheDir := filepath.Dir(cachePath)
 	tempFile, err := os.CreateTemp(cacheDir, "minimalwave-*.mp3.tmp")
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %v", err)
+		return "", fmt.Errorf("failed to create temporary file: %v", err)
 	}
 	tempPath := tempFile.Name()
-
-	defer os.Remove(tempPath) // Always clean up temp file
-
-	// Start player immediately
+	defer os.Remove(tempPath)
 	player, args, err := findPlayer(tempPath)
 	if err != nil {
 		tempFile.Close()
-		return err
+		return "", err
 	}
 	cmd := exec.Command(player, args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.Stdin = os.Stdin
-
 	time.Sleep(100 * time.Millisecond)
-
 	if err := cmd.Start(); err != nil {
 		tempFile.Close()
-		return fmt.Errorf("failed to start player: %v", err)
+		return "", fmt.Errorf("failed to start player: %v", err)
 	}
-
-	// Download while player is running
 	totalSize := resp.ContentLength
 	progressReader := &progressReader{
 		reader:     resp.Body,
 		total:      totalSize,
 		onProgress: createColorBlockProgress(totalSize),
 	}
-
 	_, err = io.Copy(tempFile, progressReader)
 	fmt.Print("\r\033[K")
-
 	if err != nil {
 		tempFile.Close()
 		cmd.Process.Kill()
-		return fmt.Errorf("failed to save to cache: %v", err)
+		return "", fmt.Errorf("failed to save to cache: %v", err)
 	}
-
 	if err := tempFile.Close(); err != nil {
 		cmd.Process.Kill()
-		return fmt.Errorf("failed to close temporary file: %v", err)
+		return "", fmt.Errorf("failed to close temporary file: %v", err)
 	}
-
-	// Download complete - copy to cache while player continues using temp file
 	if err := copyFile(tempPath, cachePath); err != nil {
-		// Don't kill player, just log the cache failure
 		log.Printf("warning: failed to cache file: %v", err)
 	}
-
-	// Wait for player to finish
 	if err := cmd.Wait(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			if exitError.ExitCode() == 130 {
-				return nil
+				return cachePath, nil
 			}
 		}
-		return err
+		return "", err
 	}
 
-	return nil
+	return cachePath, nil
+}
+
+// findRandomCachedFile finds a random .mp3 file in the cache directory
+func findRandomCachedFile(cacheDir string) (string, error) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return "", err
+	}
+	var mp3Files []string
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".mp3" {
+			mp3Files = append(mp3Files, filepath.Join(cacheDir, entry.Name()))
+		}
+	}
+	if len(mp3Files) == 0 {
+		return "", fmt.Errorf("no cached files found")
+	}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return mp3Files[rng.Intn(len(mp3Files))], nil
 }
 
 // progressReader wraps an io.Reader to track read progress
@@ -178,18 +192,18 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 
 // animateConnecting displays a single block cycling through colors
 func animateConnecting(stop chan bool) {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	colors := []int{
-		196, 202, 208, 214, 220, 226, // reds to yellows
-		46, 47, 48, 49, 50, 51, // greens
-		39, 45, 81, 87, 123, // cyans to blues
-		129, 135, 141, 177, 183, // purples
-		201, 207, 213, 219, 225, // pinks to light colors
-	}
-
-	ticker := time.NewTicker(100 * time.Millisecond)
+	var (
+		rng    = rand.New(rand.NewSource(time.Now().UnixNano()))
+		colors = []int{
+			196, 202, 208, 214, 220, 226, // reds to yellows
+			46, 47, 48, 49, 50, 51, // greens
+			39, 45, 81, 87, 123, // cyans to blues
+			129, 135, 141, 177, 183, // purples
+			201, 207, 213, 219, 225, // pinks to light colors
+		}
+		ticker = time.NewTicker(100 * time.Millisecond)
+	)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-stop:
@@ -209,7 +223,6 @@ func createColorBlockProgress(total int64) func(current, total int64) {
 		lastBlocks = 0
 		rng        = rand.New(rand.NewSource(time.Now().UnixNano()))
 	)
-
 	// ANSI 256-color palette - vibrant colors
 	colors := []int{
 		196, 202, 208, 214, 220, 226, // reds to yellows
@@ -218,15 +231,12 @@ func createColorBlockProgress(total int64) func(current, total int64) {
 		129, 135, 141, 177, 183, // purples
 		201, 207, 213, 219, 225, // pinks to light colors
 	}
-
 	return func(current, total int64) {
 		if total <= 0 {
 			return
 		}
-
 		progress := float64(current) / float64(total)
 		blocks := int(progress * blockCount)
-
 		if blocks > lastBlocks {
 			for i := lastBlocks; i < blocks; i++ {
 				color := colors[rng.Intn(len(colors))]
