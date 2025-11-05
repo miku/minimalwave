@@ -1,9 +1,7 @@
 # minimalwave
 
-Play a random set from Minimal Wave
-([EVR](https://en.wikipedia.org/wiki/East_Village_Radio), 70/80, synth, wave)
-from [Minimal
-Wave](https://archive.org/details/eastvillageradio-minimal-wave?tab=collection)
+Play a random set from [Minimal Wave](https://archive.org/details/eastvillageradio-minimal-wave?tab=collection)
+([EVR](https://en.wikipedia.org/wiki/East_Village_Radio), 70s/80s, synth, wave)
 collection.
 
 > [Veronica Vasicka](https://en.wikipedia.org/wiki/Veronica_Vasicka) has been
