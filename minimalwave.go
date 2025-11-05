@@ -74,7 +74,7 @@ func downloadOrUseCached(identifier, cachePath string) error {
 
 	resp, err := http.Get(url)
 	stopAnimation <- true
-	fmt.Print("\r\033[K") // Clear the connecting animation line
+	fmt.Print("\r\033[K")
 
 	if err != nil {
 		return fmt.Errorf("failed to download: %v", err)
@@ -84,7 +84,6 @@ func downloadOrUseCached(identifier, cachePath string) error {
 		return fmt.Errorf("download (%s) failed with status: %d", url, resp.StatusCode)
 	}
 
-	// Create temporary file in the same directory as the final cache path
 	cacheDir := filepath.Dir(cachePath)
 	tempFile, err := os.CreateTemp(cacheDir, "minimalwave-*.mp3.tmp")
 	if err != nil {
@@ -92,17 +91,28 @@ func downloadOrUseCached(identifier, cachePath string) error {
 	}
 	tempPath := tempFile.Name()
 
-	// Ensure cleanup of temp file on error
-	defer func() {
-		if tempPath != "" {
-			os.Remove(tempPath)
-		}
-	}()
+	defer os.Remove(tempPath) // Always clean up temp file
 
-	// Get content length for progress tracking
+	// Start player immediately
+	player, args, err := findPlayer(tempPath)
+	if err != nil {
+		tempFile.Close()
+		return err
+	}
+	cmd := exec.Command(player, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.Stdin = os.Stdin
+
+	time.Sleep(100 * time.Millisecond)
+
+	if err := cmd.Start(); err != nil {
+		tempFile.Close()
+		return fmt.Errorf("failed to start player: %v", err)
+	}
+
+	// Download while player is running
 	totalSize := resp.ContentLength
-
-	// Create progress reader with colorful blocks
 	progressReader := &progressReader{
 		reader:     resp.Body,
 		total:      totalSize,
@@ -110,24 +120,34 @@ func downloadOrUseCached(identifier, cachePath string) error {
 	}
 
 	_, err = io.Copy(tempFile, progressReader)
-	fmt.Print("\r\033[K") // Clear the progress line
+	fmt.Print("\r\033[K")
 
 	if err != nil {
 		tempFile.Close()
+		cmd.Process.Kill()
 		return fmt.Errorf("failed to save to cache: %v", err)
 	}
 
 	if err := tempFile.Close(); err != nil {
+		cmd.Process.Kill()
 		return fmt.Errorf("failed to close temporary file: %v", err)
 	}
 
-	// Atomically move the temp file to the final location
-	if err := os.Rename(tempPath, cachePath); err != nil {
-		return fmt.Errorf("failed to move file to cache: %v", err)
+	// Download complete - copy to cache while player continues using temp file
+	if err := copyFile(tempPath, cachePath); err != nil {
+		// Don't kill player, just log the cache failure
+		log.Printf("warning: failed to cache file: %v", err)
 	}
 
-	// Clear tempPath so defer doesn't try to remove it
-	tempPath = ""
+	// Wait for player to finish
+	if err := cmd.Wait(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			if exitError.ExitCode() == 130 {
+				return nil
+			}
+		}
+		return err
+	}
 
 	return nil
 }
@@ -246,6 +266,23 @@ func cleanupTempFiles(cacheDir string) error {
 		}
 	}
 	return nil
+}
+
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
 }
 
 // identifiers can be mapped to download urls, https://archive.org/download/evr_1280-23176-20101128/1280-23176-20101128.mp3
