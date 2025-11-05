@@ -1,6 +1,8 @@
 # minimalwave
 
-Play a random set from Minimal Wave (EVR, 70/80, synth, wave) from [Minimal
+Play a random set from Minimal Wave
+([EVR](https://en.wikipedia.org/wiki/East_Village_Radio), 70/80, synth, wave)
+from [Minimal
 Wave](https://archive.org/details/eastvillageradio-minimal-wave?tab=collection)
 collection.
 
