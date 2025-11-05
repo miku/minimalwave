@@ -215,6 +215,7 @@ func findPlayer(filePath string) (string, []string, error) {
 		name string
 		args []string
 	}{
+		{"afplay", []string{filePath}}, // macos
 		{"cvlc", []string{"-q", filePath}},
 		{"vlc", []string{"-q", "--intf", "dummy", filePath}},
 		{"mpg123", []string{filePath}},
