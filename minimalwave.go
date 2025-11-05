@@ -42,8 +42,8 @@ func main() {
 	}
 
 	cmd := exec.Command(player, args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Start(); err != nil {
@@ -91,7 +91,7 @@ func downloadOrUseCached(identifier, cachePath string) error {
 		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
 	tempPath := tempFile.Name()
-
+	
 	// Ensure cleanup of temp file on error
 	defer func() {
 		if tempPath != "" {
@@ -110,7 +110,7 @@ func downloadOrUseCached(identifier, cachePath string) error {
 	}
 
 	_, err = io.Copy(tempFile, progressReader)
-	fmt.Println() // New line after progress
+	fmt.Print("\r\033[K") // Clear the progress line
 
 	if err != nil {
 		tempFile.Close()
@@ -128,7 +128,7 @@ func downloadOrUseCached(identifier, cachePath string) error {
 
 	// Clear tempPath so defer doesn't try to remove it
 	tempPath = ""
-
+	
 	return nil
 }
 
