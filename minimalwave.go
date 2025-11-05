@@ -42,8 +42,8 @@ func main() {
 	}
 
 	cmd := exec.Command(player, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Start(); err != nil {
@@ -68,17 +68,14 @@ func downloadOrUseCached(identifier, cachePath string) error {
 		return fmt.Errorf("unexpected id: %v", identifier)
 	}
 	url := fmt.Sprintf("https://archive.org/download/%s/%s.mp3", identifier, identifier[4:])
-	
-	fmt.Printf("Connecting to %s... \033[48;5;%dm \033[0m", identifier[4:], 196) // Initial red block
-	
-	// Animate a single block while connecting
+
 	stopAnimation := make(chan bool)
 	go animateConnecting(stopAnimation)
-	
+
 	resp, err := http.Get(url)
 	stopAnimation <- true
 	fmt.Print("\r\033[K") // Clear the connecting animation line
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to download: %v", err)
 	}
@@ -86,31 +83,52 @@ func downloadOrUseCached(identifier, cachePath string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download (%s) failed with status: %d", url, resp.StatusCode)
 	}
-	
-	fmt.Printf("Downloading %s...\n", identifier[4:])
-	
-	file, err := os.Create(cachePath)
+
+	// Create temporary file in the same directory as the final cache path
+	cacheDir := filepath.Dir(cachePath)
+	tempFile, err := os.CreateTemp(cacheDir, "minimalwave-*.mp3.tmp")
 	if err != nil {
-		return fmt.Errorf("failed to create cache file: %v", err)
+		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
-	defer file.Close()
-	
+	tempPath := tempFile.Name()
+
+	// Ensure cleanup of temp file on error
+	defer func() {
+		if tempPath != "" {
+			os.Remove(tempPath)
+		}
+	}()
+
 	// Get content length for progress tracking
 	totalSize := resp.ContentLength
-	
+
 	// Create progress reader with colorful blocks
 	progressReader := &progressReader{
-		reader:    resp.Body,
-		total:     totalSize,
+		reader:     resp.Body,
+		total:      totalSize,
 		onProgress: createColorBlockProgress(totalSize),
 	}
-	
-	_, err = io.Copy(file, progressReader)
+
+	_, err = io.Copy(tempFile, progressReader)
 	fmt.Println() // New line after progress
-	
+
 	if err != nil {
+		tempFile.Close()
 		return fmt.Errorf("failed to save to cache: %v", err)
 	}
+
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary file: %v", err)
+	}
+
+	// Atomically move the temp file to the final location
+	if err := os.Rename(tempPath, cachePath); err != nil {
+		return fmt.Errorf("failed to move file to cache: %v", err)
+	}
+
+	// Clear tempPath so defer doesn't try to remove it
+	tempPath = ""
+
 	return nil
 }
 
@@ -136,15 +154,15 @@ func animateConnecting(stop chan bool) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	colors := []int{
 		196, 202, 208, 214, 220, 226, // reds to yellows
-		46, 47, 48, 49, 50, 51,       // greens
-		39, 45, 81, 87, 123,          // cyans to blues
-		129, 135, 141, 177, 183,      // purples
-		201, 207, 213, 219, 225,      // pinks to light colors
+		46, 47, 48, 49, 50, 51, // greens
+		39, 45, 81, 87, 123, // cyans to blues
+		129, 135, 141, 177, 183, // purples
+		201, 207, 213, 219, 225, // pinks to light colors
 	}
-	
+
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-stop:
@@ -159,39 +177,35 @@ func animateConnecting(stop chan bool) {
 
 // createColorBlockProgress returns a progress callback that displays colorful blocks
 func createColorBlockProgress(total int64) func(current, total int64) {
-	const blockCount = 50
-	lastBlocks := 0
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	
+	const blockCount = 100
+	var (
+		lastBlocks = 0
+		rng        = rand.New(rand.NewSource(time.Now().UnixNano()))
+	)
+
 	// ANSI 256-color palette - vibrant colors
 	colors := []int{
 		196, 202, 208, 214, 220, 226, // reds to yellows
-		46, 47, 48, 49, 50, 51,       // greens
-		39, 45, 81, 87, 123,          // cyans to blues
-		129, 135, 141, 177, 183,      // purples
-		201, 207, 213, 219, 225,      // pinks to light colors
+		46, 47, 48, 49, 50, 51, // greens
+		39, 45, 81, 87, 123, // cyans to blues
+		129, 135, 141, 177, 183, // purples
+		201, 207, 213, 219, 225, // pinks to light colors
 	}
-	
+
 	return func(current, total int64) {
 		if total <= 0 {
 			return
 		}
-		
+
 		progress := float64(current) / float64(total)
 		blocks := int(progress * blockCount)
-		
-		// Only update when we have new blocks to draw
+
 		if blocks > lastBlocks {
 			for i := lastBlocks; i < blocks; i++ {
 				color := colors[rng.Intn(len(colors))]
 				fmt.Printf("\033[48;5;%dm \033[0m", color)
 			}
 			lastBlocks = blocks
-		}
-		
-		// Flush to ensure immediate display
-		if blocks == blockCount {
-			fmt.Print(" ✓")
 		}
 	}
 }
