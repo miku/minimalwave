@@ -185,14 +185,14 @@ type progressReader struct {
 	reader     io.Reader
 	total      int64
 	current    int64
-	onProgress func(current, total int64)
+	onProgress func(current int64)
 }
 
 func (pr *progressReader) Read(p []byte) (int, error) {
 	n, err := pr.reader.Read(p)
 	pr.current += int64(n)
 	if pr.onProgress != nil {
-		pr.onProgress(pr.current, pr.total)
+		pr.onProgress(pr.current)
 	}
 	return n, err
 }
@@ -224,7 +224,7 @@ func animateConnecting(stop chan bool) {
 }
 
 // createColorBlockProgress returns a progress callback that displays colorful blocks
-func createColorBlockProgress(total int64) func(current, total int64) {
+func createColorBlockProgress(total int64) func(current int64) {
 	const blockCount = 64
 	var (
 		lastBlocks = 0
@@ -238,7 +238,7 @@ func createColorBlockProgress(total int64) func(current, total int64) {
 		129, 135, 141, 177, 183, // purples
 		201, 207, 213, 219, 225, // pinks to light colors
 	}
-	return func(current, total int64) {
+	return func(current int64) {
 		if total <= 0 {
 			return
 		}
