@@ -32,23 +32,11 @@ func main() {
 	if err := cleanupTempFiles(cacheDir); err != nil {
 		log.Printf("warning: failed to clean up temp files: %v", err)
 	}
-
-	var (
-		identifier = identifiers[time.Now().UnixNano()%int64(len(identifiers))]
-		hasher     = md5.New()
-	)
-	hasher.Write([]byte(identifier))
-	var (
-		hash      = hex.EncodeToString(hasher.Sum(nil))
-		filename  = fmt.Sprintf("%s.mp3", hash)
-		cachePath = filepath.Join(cacheDir, filename)
-	)
-
-	fileToPlay, err := downloadOrUseCached(identifier, cachePath, cacheDir)
+	var identifier = identifiers[time.Now().UnixNano()%int64(len(identifiers))]
+	fileToPlay, err := downloadOrUseCached(identifier, cacheDir)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	player, args, err := findPlayer(fileToPlay)
 	if err != nil {
 		log.Fatal(err)
@@ -70,7 +58,14 @@ func main() {
 	}
 }
 
-func downloadOrUseCached(identifier, cachePath, cacheDir string) (string, error) {
+func downloadOrUseCached(identifier, cacheDir string) (string, error) {
+	var hasher = md5.New()
+	hasher.Write([]byte(identifier))
+	var (
+		hash      = hex.EncodeToString(hasher.Sum(nil))
+		filename  = fmt.Sprintf("%s.mp3", hash)
+		cachePath = filepath.Join(cacheDir, filename)
+	)
 	if _, err := os.Stat(cachePath); err == nil {
 		return cachePath, nil
 	}
