@@ -293,13 +293,11 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer sourceFile.Close()
-
 	destFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer destFile.Close()
-
 	_, err = io.Copy(destFile, sourceFile)
 	return err
 }
