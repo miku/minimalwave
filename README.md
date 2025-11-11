@@ -24,3 +24,7 @@ $ minimalwave
 ```
 
 ![](static/screenshot-2025-11-05-132530.png)
+
+Files will be cached in
+[XDG](https://wiki.archlinux.org/title/XDG_Base_Directory) cache home, e.g.
+`~/.cache/minimalwave/` or the like.
