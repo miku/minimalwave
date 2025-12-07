@@ -20,6 +20,10 @@ const (
 	httpTimeout = 10 * time.Second
 )
 
+var (
+	shortDownloadDuration = 30 * time.Second
+)
+
 func main() {
 	userCacheDir, err := os.UserCacheDir()
 	if err != nil {
@@ -70,7 +74,7 @@ func downloadOrUseCached(identifier, cacheDir string) (string, error) {
 		return cachePath, nil
 	}
 	if len(identifier) != 23 {
-		return "", fmt.Errorf("unexpected id: %v", identifier)
+		return "", fmt.Errorf("unexpected id format: %v", identifier)
 	}
 	url := fmt.Sprintf("https://archive.org/download/%s/%s.mp3", identifier, identifier[4:])
 	stopAnimation := make(chan bool)
@@ -95,8 +99,7 @@ func downloadOrUseCached(identifier, cacheDir string) (string, error) {
 	if err != nil {
 		cachedFile, cacheErr := findRandomCachedFile(cacheDir)
 		if cacheErr != nil {
-			fmt.Printf("no connection and nothing cached")
-			os.Exit(1)
+			log.Fatal("no connection and nothing cached")
 		}
 		return cachedFile, nil
 	}
@@ -130,29 +133,64 @@ func downloadOrUseCached(identifier, cacheDir string) (string, error) {
 		total:      totalSize,
 		onProgress: createColorBlockProgress(totalSize),
 	}
-	_, err = io.Copy(tempFile, progressReader)
-	fmt.Print("\r\033[K")
-	if err != nil {
-		tempFile.Close()
-		cmd.Process.Kill()
-		return "", fmt.Errorf("failed to save to cache: %v", err)
+	playerDone := make(chan error, 1)
+	go func() {
+		playerDone <- cmd.Wait()
+	}()
+	downloadStart := time.Now()
+	downloadDone := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(tempFile, progressReader)
+		downloadDone <- err
+	}()
+
+	var playerErr error
+	select {
+	case playerErr = <-playerDone:
+		downloadDuration := time.Since(downloadStart)
+		fmt.Print("\r\033[K")
+		if downloadDuration < shortDownloadDuration {
+			tempFile.Close()
+			if exitError, ok := playerErr.(*exec.ExitError); ok && exitError.ExitCode() == 130 {
+				return "", fmt.Errorf("interrupted by user")
+			}
+			cachedFile, cacheErr := findRandomCachedFile(cacheDir)
+			if cacheErr == nil {
+				fmt.Fprintln(os.Stderr, "⚡ signal weak, switching to cached broadcast...")
+				time.Sleep(500 * time.Millisecond)
+				return cachedFile, nil
+			}
+			return "", fmt.Errorf("stream interrupted and no cached files available")
+		}
+		downloadErr := <-downloadDone
+		fmt.Print("\r\033[K")
+		if downloadErr != nil {
+			tempFile.Close()
+			return "", fmt.Errorf("failed to save to cache: %v", downloadErr)
+		}
+	case downloadErr := <-downloadDone:
+		fmt.Print("\r\033[K")
+		if downloadErr != nil {
+			tempFile.Close()
+			cmd.Process.Kill()
+			return "", fmt.Errorf("failed to save to cache: %v", downloadErr)
+		}
+		playerErr = <-playerDone
 	}
 	if err := tempFile.Close(); err != nil {
-		cmd.Process.Kill()
 		return "", fmt.Errorf("failed to close temporary file: %v", err)
 	}
 	if err := copyFile(tempPath, cachePath); err != nil {
 		log.Printf("warning: failed to cache file: %v", err)
 	}
-	if err := cmd.Wait(); err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+	if playerErr != nil {
+		if exitError, ok := playerErr.(*exec.ExitError); ok {
 			if exitError.ExitCode() == 130 {
 				return cachePath, nil
 			}
 		}
-		return "", err
+		return "", playerErr
 	}
-
 	return cachePath, nil
 }
 
