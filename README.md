@@ -1,8 +1,10 @@
 # minimalwave
 
-Play a random set from [Minimal Wave](https://archive.org/details/eastvillageradio-minimal-wave?tab=collection)
+Play a random set from [Minimal
+Wave](https://archive.org/details/eastvillageradio-minimal-wave?tab=collection)
 ([EVR](https://en.wikipedia.org/wiki/East_Village_Radio), 70s/80s, synth, wave)
-collection.
+collection. It will use an available headless terminal player - so it will feel
+a bit like radio, as you will not be to rewind or fast forward.
 
 > [Veronica Vasicka](https://en.wikipedia.org/wiki/Veronica_Vasicka) has been
 > hosting her EVR show since 2003. She explores a range of electronic music
